@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Loader2, Save, X } from 'lucide-react'
+import { Plus, Loader2, Save, X, Copy, Check } from 'lucide-react'
 
 type Driver = {
   id: string
@@ -13,6 +13,8 @@ type Driver = {
   is_active: boolean
   profiles: { full_name: string; phone: string | null } | null
 }
+
+type Credentials = { loginEmail: string; tempPassword: string }
 
 const EMPTY_FORM = { full_name: '', employee_no: '', base_salary: '', shift_start: '08:00', shift_end: '17:00', phone: '' }
 
@@ -25,7 +27,8 @@ export default function DriversPage() {
   const [addForm, setAddForm] = useState({ ...EMPTY_FORM, email: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const [credentials, setCredentials] = useState<Credentials | null>(null)
+  const [copied, setCopied] = useState<'email' | 'pass' | null>(null)
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('drivers')
@@ -69,13 +72,13 @@ export default function DriversPage() {
   }
 
   async function addDriver() {
-    setSaving(true); setError(''); setSuccess('')
+    setSaving(true); setError('')
 
     const res = await fetch('/api/invite-driver', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: addForm.email,
+        email: addForm.email || undefined,
         full_name: addForm.full_name,
         phone: addForm.phone,
         employee_no: addForm.employee_no,
@@ -88,25 +91,61 @@ export default function DriversPage() {
     const json = await res.json()
     if (!res.ok) { setError(json.error); setSaving(false); return }
 
-    setSuccess(`Invite sent to ${addForm.email}. The driver will receive an email to set their password.`)
+    setCredentials({ loginEmail: json.loginEmail, tempPassword: json.tempPassword })
     setShowAdd(false)
     setAddForm({ ...EMPTY_FORM, email: '' })
     await load()
     setSaving(false)
   }
 
+  function copyText(text: string, field: 'email' | 'pass') {
+    navigator.clipboard.writeText(text)
+    setCopied(field)
+    setTimeout(() => setCopied(null), 2000)
+  }
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Drivers</h1>
-        <button onClick={() => { setShowAdd(true); setError(''); setSuccess('') }}
+        <button onClick={() => { setShowAdd(true); setError(''); setCredentials(null) }}
           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
           <Plus size={16} />Add Driver
         </button>
       </div>
 
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-4 py-2">{error}</p>}
-      {success && <p className="text-sm text-green-700 bg-green-50 rounded-lg px-4 py-2">{success}</p>}
+
+      {/* Credentials card shown after driver is created */}
+      {credentials && (
+        <div className="bg-green-50 border border-green-200 rounded-2xl p-5 space-y-3">
+          <p className="font-semibold text-green-800">✅ Driver added! Share these login details with them:</p>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between bg-white border rounded-lg px-3 py-2">
+              <div>
+                <p className="text-xs text-gray-400 mb-0.5">Login email</p>
+                <p className="text-sm font-mono text-gray-800">{credentials.loginEmail}</p>
+              </div>
+              <button onClick={() => copyText(credentials.loginEmail, 'email')}
+                className="p-1.5 text-gray-400 hover:text-gray-600">
+                {copied === 'email' ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
+              </button>
+            </div>
+            <div className="flex items-center justify-between bg-white border rounded-lg px-3 py-2">
+              <div>
+                <p className="text-xs text-gray-400 mb-0.5">Temporary password</p>
+                <p className="text-sm font-mono text-gray-800">{credentials.tempPassword}</p>
+              </div>
+              <button onClick={() => copyText(credentials.tempPassword, 'pass')}
+                className="p-1.5 text-gray-400 hover:text-gray-600">
+                {copied === 'pass' ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-green-700">The driver should change their password after first login.</p>
+          <button onClick={() => setCredentials(null)} className="text-xs text-green-600 underline">Dismiss</button>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border overflow-hidden">
         <table className="w-full text-sm">
@@ -183,19 +222,23 @@ export default function DriversPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-4">
             <h2 className="text-lg font-bold text-gray-900">Add Driver</h2>
-            <p className="text-xs text-gray-500">An invite email will be sent so the driver sets their own password.</p>
+            <p className="text-xs text-gray-500">A login account will be created. You&apos;ll receive a temporary password to share with the driver.</p>
             {[
-              { label: 'Full Name', key: 'full_name', type: 'text' },
-              { label: 'Email', key: 'email', type: 'email' },
-              { label: 'Employee No', key: 'employee_no', type: 'text' },
-              { label: 'Phone', key: 'phone', type: 'tel' },
-              { label: 'Base Salary (RM)', key: 'base_salary', type: 'number' },
+              { label: 'Full Name *', key: 'full_name', type: 'text', required: true },
+              { label: 'Employee No *', key: 'employee_no', type: 'text', required: true },
+              { label: 'Phone', key: 'phone', type: 'tel', required: false },
+              { label: 'Email (optional)', key: 'email', type: 'email', required: false },
+              { label: 'Base Salary (RM) *', key: 'base_salary', type: 'number', required: true },
             ].map(f => (
               <div key={f.key}>
                 <label className="block text-xs font-medium text-gray-600 mb-1">{f.label}</label>
-                <input type={f.type} value={(addForm as Record<string, string>)[f.key]}
+                <input
+                  type={f.type}
+                  value={(addForm as Record<string, string>)[f.key]}
                   onChange={e => setAddForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  placeholder={f.key === 'email' ? 'Leave blank if driver has no email' : ''}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
             ))}
             <div className="grid grid-cols-2 gap-3">
@@ -212,7 +255,7 @@ export default function DriversPage() {
             <div className="flex gap-3">
               <button onClick={addDriver} disabled={saving}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg py-2 text-sm flex items-center justify-center gap-2">
-                {saving && <Loader2 size={14} className="animate-spin" />}Send Invite
+                {saving && <Loader2 size={14} className="animate-spin" />}Add Driver
               </button>
               <button onClick={() => { setShowAdd(false); setError('') }}
                 className="px-4 border rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
